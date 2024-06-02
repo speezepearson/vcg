@@ -1,5 +1,7 @@
+import csv
+from collections import Counter, defaultdict
 import dataclasses
-from typing import List, Mapping, Optional
+from typing import List, Mapping, MutableMapping, Optional
 
 Price = int
 PlayerId = str
@@ -48,38 +50,40 @@ class Auction:
                         winning_bids={first_player_id: bid, **subsoln.winning_bids}
                     )
 
+        assert best_soln.revenue >= 0
+        
+        item_sold_counts: MutableMapping[ItemId, int] = Counter()
+        for bid in best_soln.winning_bids.values():
+            for item, count in bid.item_counts.items():
+                item_sold_counts[item] += count
+        assert all(
+            item_sold_counts[item] <= count
+            for item, count in self.item_counts.items()
+        )
         return best_soln
     
-def make_fake_auction(seed=None):
-    import random
-    if seed is not None:
-        random.seed(seed)
-    n_item_kinds = int(random.binomialvariate(n=30, p=0.3))
-    item_counts = {f'i{i}': random.randint(1, 10) for i in range(n_item_kinds)}
-    n_players = int(random.binomialvariate(n=40, p=0.5))
-    bids = {
-        f'p{i}': [
-            Bid(
-                price=random.randint(1, 100),
-                item_counts={
-                    item_id: random.randint(1, item_counts[item_id]+1)
-                    for item_id in item_counts
-                    if random.random() < 1/3
-                }
-            )
-            for _ in range(random.randint(1, 5))
-        ]
-        for i in range(n_players)
-    }
-    # breakpoint()
-    return Auction(item_counts=item_counts, bids=bids)
+    @classmethod
+    def from_csv(cls, file):
+        rows = list(csv.DictReader(file))
 
-def pprint_auction(auction: Auction, soln: Optional[Soln]):
+        assert rows[0]['Bidder'] == '__QUANTITY__' and rows[0]['Price'] == ''
+        quantity_row, *rows = rows
+        item_quantities = {k: int(v) for k, v in quantity_row.items() if k not in {'Bidder', 'Price'}}
+
+        bids = defaultdict(list)
+        for row in rows:
+            bids[row['Bidder']].append(Bid(
+                price=int(row['Price']),
+                item_counts={item: int(row[item]) for item in item_quantities}
+            ))
+
+        return cls(item_counts=item_quantities, bids=dict(bids))
+    
+def pprint_auction(auction: Auction, soln: Optional[Soln] = None):
     pnamew = max(len(player_id) for player_id in auction.bids.keys())
     countw = max(len(str(count)) for count in auction.item_counts.values())
     pricew = max(len(str(bid.price)) for bids in auction.bids.values() for bid in bids)
     item_ids = sorted(auction.item_counts.keys())
-    print('pricew:', pricew)
     for player_id, bids in auction.bids.items():
         for bid in bids:
             if soln is not None:
@@ -88,32 +92,3 @@ def pprint_auction(auction: Auction, soln: Optional[Soln]):
             for item_id in item_ids:
                 print(f'{bid.item_counts.get(item_id, 0): {countw}d}', end=' ')
             print()
-
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument('--seed', type=int)
-
-def main(args: argparse.Namespace):
-    seed: Optional[int] = args.seed
-    print(Auction(
-        item_counts={'apple': 2},
-        bids={
-            'Spencer': [
-                Bid(price=10, item_counts={'apple': 1}),
-                Bid(price=20, item_counts={'apple': 2}),
-            ],
-            'Yam': [
-                Bid(price=15, item_counts={'apple': 1}),
-            ],
-        }
-    ).solve())
-    
-    fake = make_fake_auction(seed=seed)
-    print()
-    pprint_auction(fake, None)
-    print()
-    pprint_auction(fake, fake.solve())
-
-
-if __name__ == '__main__':
-    main(parser.parse_args())
